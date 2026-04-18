@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { ShieldAlert, Trash2 } from 'lucide-react';
+import { Check, X, Users, DollarSign } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const [users, setUsers] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchUsers = async () => {
+  const fetchAdminTasks = async () => {
     try {
-      const res = await axios.get('/admin/users');
-      setUsers(res.data);
+      const res = await axios.get('/admin/tasks');
+      setTasks(res.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -18,64 +18,88 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    fetchUsers();
+    fetchAdminTasks();
   }, []);
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this user?")) return;
+  const handleTaskAction = async (taskId, action) => {
     try {
-      await axios.delete(`/admin/users/${id}`);
-      setUsers(users.filter(u => u.id !== id));
+      await axios.put(`/admin/tasks/${taskId}/${action}`);
+      alert(`Task ${action}ed!`);
+      fetchAdminTasks();
     } catch (err) {
-      alert(err.response?.data?.error || "Error deleting user");
+      alert("Action failed: " + (err.response?.data?.error || "Unknown error"));
     }
   };
 
-  if (loading) return <div className="container">Loading users...</div>;
+  if (loading) return <div className="container" style={{ textAlign: "center", marginTop: "100px" }}>Loading...</div>;
+
+  const pendingTasks = tasks.filter(t => t.status === 'pending_approval');
+  const otherTasks = tasks.filter(t => t.status !== 'pending_approval');
 
   return (
     <div className="fade-in">
       <div className="page-header">
         <div>
           <h1 className="page-title">Admin Control Panel</h1>
-          <p className="page-subtitle">Manage platform users and moderation.</p>
+          <p className="page-subtitle">Review pending tasks and verify deposits</p>
         </div>
       </div>
-      
-      <div style={{ background: 'var(--item-bg)', borderRadius: '16px', border: '1px solid var(--border-color)', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ background: 'rgba(255,255,255,0.05)', textAlign: 'left' }}>
-              <th style={{ padding: '16px' }}>ID</th>
-              <th style={{ padding: '16px' }}>Username</th>
-              <th style={{ padding: '16px' }}>Points</th>
-              <th style={{ padding: '16px' }}>Role</th>
-              <th style={{ padding: '16px' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(u => (
-              <tr key={u.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                <td style={{ padding: '16px' }}>{u.id}</td>
-                <td style={{ padding: '16px', fontWeight: 600 }}>{u.username}</td>
-                <td style={{ padding: '16px' }}>{u.points}</td>
-                <td style={{ padding: '16px' }}>
-                  <span className={`badge ${u.role === 'admin' ? 'completed' : 'open'}`}>
-                    {u.role}
-                  </span>
-                </td>
-                <td style={{ padding: '16px' }}>
-                  {u.role !== 'admin' && (
-                    <button className="btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDelete(u.id)}>
-                      <Trash2 size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Delete
-                    </button>
-                  )}
-                  {u.role === 'admin' && <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}><ShieldAlert size={14} style={{ verticalAlign: 'middle' }}/> Superuser</span>}
-                </td>
-              </tr>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        <section>
+          <h2 style={{ marginBottom: '16px', fontSize: '1.2rem', color: 'var(--primary)' }}>Pending Approval ({pendingTasks.length})</h2>
+          {pendingTasks.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)' }}>No tasks awaiting approval.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {pendingTasks.map(task => (
+                <div key={task.id} className="task-list-item" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                    <div>
+                      <h3 style={{ fontSize: '1.1rem' }}>{task.title}</h3>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Posted by @{task.creator_username} • {new Date(task.created_at).toLocaleString()}</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button className="btn-primary" onClick={() => handleTaskAction(task.id, 'approve')} style={{ background: '#10b981' }}><Check size={18} /> Approve</button>
+                      <button className="btn-danger" onClick={() => handleTaskAction(task.id, 'reject')}><X size={18} /> Reject</button>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(0,0,0,0.1)', padding: '16px', borderRadius: '12px', width: '100%' }}>
+                    <p style={{ fontSize: '0.9rem', marginBottom: '12px' }}>{task.description}</p>
+                    <div style={{ display: 'flex', gap: '24px', fontSize: '0.9rem' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><DollarSign size={16} color="var(--active-bg)" /> <strong>Pool: {task.total_prize_pool}</strong></span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Users size={16} /> <strong>Participants: {task.max_participants}</strong></span>
+                    </div>
+                  </div>
+
+                  <div style={{ width: '100%' }}>
+                    <p style={{ fontSize: '0.85rem', marginBottom: '8px', fontWeight: 'bold' }}>Deposit Proof:</p>
+                    <a href={`http://localhost:5000${task.deposit_proof}`} target="_blank" rel="noreferrer">
+                      <img src={`http://localhost:5000${task.deposit_proof}`} alt="Deposit Proof" style={{ maxHeight: '200px', borderRadius: '8px', border: '1px solid var(--border-color)' }} />
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 style={{ marginBottom: '16px', fontSize: '1.2rem', color: 'var(--text-muted)' }}>Active/Past Tasks</h2>
+          <div style={{ opacity: 0.7 }}>
+            {otherTasks.map(task => (
+              <div key={task.id} className="task-list-item" style={{ marginBottom: '12px', padding: '12px 20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                  <div>
+                    <h4 style={{ fontSize: '0.95rem' }}>{task.title} <span className={`badge ${task.status}`} style={{ marginLeft: '8px', fontSize: '0.7rem' }}>{task.status}</span></h4>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>By @{task.creator_username} • Prize Pool: {task.total_prize_pool}</p>
+                  </div>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        </section>
       </div>
     </div>
   );

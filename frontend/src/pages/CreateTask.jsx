@@ -1,77 +1,97 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { Info } from 'lucide-react';
 
-export default function CreateTask({ user, setCurrentUser }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [rewardPoints, setRewardPoints] = useState(100);
-  const [deadline, setDeadline] = useState('');
-  const [rewardUrl, setRewardUrl] = useState('');
+export default function CreateTask({ user }) {
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    total_prize_pool: '',
+    max_participants: '1',
+    deadline: '',
+    reward_url: ''
+  });
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (rewardPoints > user.points) {
-      setError("Insufficient points.");
-      return;
-    }
+    setLoading(true);
+    setError('');
 
     try {
-      const payload = { title, description, reward_points: parseInt(rewardPoints) };
-      if (deadline) payload.deadline = deadline;
-      if (rewardUrl) payload.reward_url = rewardUrl;
-
-      await axios.post('/tasks', payload);
-      if (setCurrentUser) {
-        setCurrentUser({ ...user, points: user.points - parseInt(rewardPoints) });
-      }
-      navigate('/dashboard');
+      const res = await axios.post('/tasks', formData);
+      const taskId = res.data.id;
+      navigate(`/payment/${taskId}`);
     } catch (err) {
       setError(err.response?.data?.error || "Error creating task");
+    } finally {
+      setLoading(false);
     }
   };
+
+  const rewardPerPerson = formData.total_prize_pool && formData.max_participants 
+    ? Math.floor(parseInt(formData.total_prize_pool) / parseInt(formData.max_participants))
+    : 0;
 
   return (
     <div className="fade-in">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Post a New Task</h1>
-          <p className="page-subtitle">Offer points to the community to get things done.</p>
+          <h1 className="page-title">Create Prize Pool</h1>
+          <p className="page-subtitle">Define your task and set the reward pool</p>
         </div>
       </div>
-      <div style={{ maxWidth: '600px', background: 'var(--item-bg)', padding: '32px', borderRadius: '16px', border: '1px solid var(--border-color)' }}>
-        
-        {error && <div style={{ color: 'var(--danger-text)', marginBottom: '16px', padding: '12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px' }}>{error}</div>}
+
+      <div className="auth-card" style={{ maxWidth: '600px', margin: '0' }}>
+        {error && <div style={{ color: 'var(--danger-text)', marginBottom: '16px', background: 'rgba(239, 68, 68, 0.1)', padding: '12px', borderRadius: '8px' }}>{error}</div>}
         
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Task Title</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="e.g. Design a logo" />
+            <input name="title" value={formData.title} onChange={handleChange} placeholder="e.g., Join our Discord & Verify" required />
           </div>
-          
+
           <div className="form-group">
             <label>Description</label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} required placeholder="Provide clear instructions..." rows="4"></textarea>
+            <textarea name="description" value={formData.description} onChange={handleChange} rows="4" placeholder="Describe the task steps clearly..." required style={{ background: 'var(--item-bg)', border: '1px solid var(--border-color)', color: 'white', padding: '12px 20px', borderRadius: '12px', width: '100%', outline: 'none' }}></textarea>
           </div>
-          
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div className="form-group">
+              <label>Total Prize Pool (IDR/USD)</label>
+              <input type="number" name="total_prize_pool" value={formData.total_prize_pool} onChange={handleChange} placeholder="Total amount" required />
+            </div>
+            <div className="form-group">
+              <label>Max Participants</label>
+              <input type="number" name="max_participants" value={formData.max_participants} onChange={handleChange} min="1" required />
+            </div>
+          </div>
+
+          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '12px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Info size={20} color="var(--primary)" />
+            <span style={{ fontSize: '0.9rem' }}>Each participant will receive <strong>{rewardPerPerson}</strong> in rewards.</span>
+          </div>
+
           <div className="form-group">
-            <label>Reward Points (Your balance: {user.points} pts)</label>
-            <input type="number" min="1" max={user.points} value={rewardPoints} onChange={(e) => setRewardPoints(e.target.value)} required />
+            <label>Reward URL (The link users get after approval)</label>
+            <input type="url" name="reward_url" value={formData.reward_url} onChange={handleChange} placeholder="https://t.me/yourgroup or https://discord.gg/..." />
           </div>
 
           <div className="form-group">
             <label>Deadline (Optional)</label>
-            <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+            <input type="date" name="deadline" value={formData.deadline} onChange={handleChange} />
           </div>
 
-          <div className="form-group">
-            <label>Reward URL (For QR Code - Optional)</label>
-            <input type="url" placeholder="https://example.com/gift-card" value={rewardUrl} onChange={(e) => setRewardUrl(e.target.value)} />
-          </div>
-          
-          <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Post Task</button>
+          <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center', height: '48px' }}>
+            {loading ? "Creating..." : "Next: Payment Proof"}
+          </button>
         </form>
       </div>
     </div>

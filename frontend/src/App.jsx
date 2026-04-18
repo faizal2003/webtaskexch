@@ -9,6 +9,7 @@ import Register from './pages/Register';
 import CreateTask from './pages/CreateTask';
 import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import PaymentPage from './pages/PaymentPage';
 
 axios.defaults.baseURL = 'http://localhost:5000/api';
 
@@ -65,7 +66,8 @@ function App() {
             <div className="page-container">
               <Routes>
                 <Route path="/" element={<Home user={user} />} />
-                <Route path="/create" element={<CreateTask user={user} setCurrentUser={setUser} />} />
+                <Route path="/create" element={<CreateTask user={user} />} />
+                <Route path="/payment/:taskId" element={<PaymentPage />} />
                 <Route path="/dashboard" element={<Dashboard user={user} />} />
                 <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />

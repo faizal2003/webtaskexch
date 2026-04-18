@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(100) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role ENUM('user', 'admin') DEFAULT 'user',
-    points INT DEFAULT 1000,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -14,11 +13,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
-    reward_points INT NOT NULL,
+    total_prize_pool INT NOT NULL DEFAULT 0,
+    max_participants INT NOT NULL DEFAULT 1,
     creator_id INT NOT NULL,
     deadline DATETIME NULL,
     reward_url VARCHAR(500) NULL,
-    status ENUM('open', 'in_progress', 'completed') DEFAULT 'open',
+    deposit_proof VARCHAR(255) NULL,
+    status ENUM('awaiting_payment', 'pending_approval', 'open', 'completed', 'rejected') DEFAULT 'awaiting_payment',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE
 );

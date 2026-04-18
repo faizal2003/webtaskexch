@@ -4,28 +4,37 @@ const adminMiddleware = require('../middleware/adminMiddleware');
 
 const router = express.Router();
 
-// Get all users
-router.get('/users', adminMiddleware, async (req, res) => {
+// Get all tasks for admin (including pending)
+router.get('/tasks', adminMiddleware, async (req, res) => {
     try {
-        const [users] = await db.query('SELECT id, username, points, role, created_at FROM users ORDER BY created_at DESC');
-        res.json(users);
+        const [tasks] = await db.query(`
+            SELECT t.*, u.username as creator_username 
+            FROM tasks t
+            JOIN users u ON t.creator_id = u.id
+            ORDER BY t.created_at DESC
+        `);
+        res.json(tasks);
     } catch (err) {
-        console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-// Delete a user
-router.delete('/users/:id', adminMiddleware, async (req, res) => {
+// Approve a task
+router.put('/tasks/:id/approve', adminMiddleware, async (req, res) => {
     try {
-        const userId = req.params.id;
-        // Check to not delete self trivially
-        if (userId == req.user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
-
-        await db.query('DELETE FROM users WHERE id = ?', [userId]);
-        res.json({ message: 'User deleted successfully' });
+        await db.query("UPDATE tasks SET status = 'open' WHERE id = ?", [req.params.id]);
+        res.json({ message: 'Task approved and published' });
     } catch (err) {
-        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Reject a task
+router.put('/tasks/:id/reject', adminMiddleware, async (req, res) => {
+    try {
+        await db.query("UPDATE tasks SET status = 'rejected' WHERE id = ?", [req.params.id]);
+        res.json({ message: 'Task rejected' });
+    } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
 });

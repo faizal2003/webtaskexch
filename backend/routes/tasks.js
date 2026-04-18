@@ -22,13 +22,15 @@ const upload = multer({ storage: storage });
 
 const router = express.Router();
 
-// Get all tasks (with creator username)
+// Get all public tasks (open)
 router.get('/', async (req, res) => {
     try {
         const [tasks] = await db.query(`
-            SELECT t.*, u.username as creator_username
+            SELECT t.*, u.username as creator_username,
+            (SELECT COUNT(*) FROM applications WHERE task_id = t.id AND status != 'rejected') as participant_count
             FROM tasks t
             JOIN users u ON t.creator_id = u.id
+            WHERE t.status = 'open'
             ORDER BY t.created_at DESC
         `);
         res.json(tasks);
@@ -38,63 +40,89 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Create a new task (deducts points)
+// Create a new task
 router.post('/', authMiddleware, async (req, res) => {
-    const connection = await db.getConnection();
     try {
-        await connection.beginTransaction();
-        const { title, description, reward_points, deadline, reward_url } = req.body;
+        const { title, description, total_prize_pool, max_participants, deadline, reward_url } = req.body;
         const creatorId = req.user.id;
 
-        if (!title || !description || reward_points <= 0) {
-            await connection.rollback();
-            return res.status(400).json({ error: 'Invalid task data' });
+        if (!title || !description || !total_prize_pool || !max_participants) {
+            return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        // Check if user has enough points
-        const [users] = await connection.query('SELECT points FROM users WHERE id = ? FOR UPDATE', [creatorId]);
-        const userPoints = users[0].points;
-        
-        if (userPoints < reward_points) {
-            await connection.rollback();
-            return res.status(400).json({ error: 'Insufficient points' });
+        const pool = parseInt(total_prize_pool);
+        const participants = parseInt(max_participants);
+
+        if (pool <= 0 || participants <= 0) {
+            return res.status(400).json({ error: 'Invalid pool or participants' });
         }
 
-        // Deduct points from creator temporarily (held in escrow basically)
-        await connection.query('UPDATE users SET points = points - ? WHERE id = ?', [reward_points, creatorId]);
-
-        // Insert task
-        const [result] = await connection.query(
-            'INSERT INTO tasks (title, description, reward_points, creator_id, deadline, reward_url) VALUES (?, ?, ?, ?, ?, ?)',
-            [title, description, reward_points, creatorId, deadline || null, reward_url || null]
+        const [result] = await db.query(
+            'INSERT INTO tasks (title, description, total_prize_pool, max_participants, creator_id, deadline, reward_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, "awaiting_payment")',
+            [title, description, pool, participants, creatorId, deadline || null, reward_url || null]
         );
 
-        await connection.commit();
-        res.status(201).json({ id: result.insertId, title, reward_points, message: 'Task created successfully' });
+        res.status(201).json({ id: result.insertId, message: 'Task created' });
     } catch (err) {
-        await connection.rollback();
         console.error(err);
         res.status(500).json({ error: 'Server error' });
-    } finally {
-        connection.release();
     }
 });
 
-// Get tasks created by me
-router.get('/my/created', authMiddleware, async (req, res) => {
+// Upload payment proof
+router.post('/:id/payment', authMiddleware, upload.single('deposit_proof'), async (req, res) => {
     try {
-        const [tasks] = await db.query('SELECT * FROM tasks WHERE creator_id = ? ORDER BY created_at DESC', [req.user.id]);
-        res.json(tasks);
-    } catch(err) {
+        const taskId = req.params.id;
+        const creatorId = req.user.id;
+        const depositProof = req.file ? `/uploads/${req.file.filename}` : null;
+        if (!depositProof) return res.status(400).json({ error: 'Proof image required' });
+
+        const [result] = await db.query(
+            "UPDATE tasks SET deposit_proof = ?, status = 'pending_approval' WHERE id = ? AND creator_id = ? AND status = 'awaiting_payment'",
+            [depositProof, taskId, creatorId]
+        );
+        if (result.affectedRows === 0) return res.status(400).json({ error: 'Task not found or already paid' });
+        res.json({ message: 'Payment proof submitted' });
+    } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-// Get tasks I applied for
+// Apply/Join a task
+router.post('/:id/apply', authMiddleware, async (req, res) => {
+    try {
+        const taskId = req.params.id;
+        const workerId = req.user.id;
+        
+        const [tasks] = await db.query('SELECT creator_id, max_participants, status FROM tasks WHERE id = ?', [taskId]);
+        if (tasks.length === 0) return res.status(404).json({ error: 'Task not found' });
+        if (tasks[0].status !== 'open') return res.status(400).json({ error: 'Task is not open' });
+        if (tasks[0].creator_id === workerId) return res.status(400).json({ error: 'Cannot join own task' });
+
+        // Check if task is full based on non-rejected applications
+        const [active] = await db.query('SELECT COUNT(*) as count FROM applications WHERE task_id = ? AND status != "rejected"', [taskId]);
+        if (active[0].count >= tasks[0].max_participants) {
+            return res.status(400).json({ error: 'Task pool is already full' });
+        }
+
+        const [existing] = await db.query('SELECT id FROM applications WHERE task_id = ? AND worker_id = ?', [taskId, workerId]);
+        if (existing.length > 0) return res.status(400).json({ error: 'Already joined' });
+
+        await db.query('INSERT INTO applications (task_id, worker_id, status) VALUES (?, ?, "pending")', [taskId, workerId]);
+        res.json({ message: 'Joined successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get my applications
 router.get('/my/applications', authMiddleware, async (req, res) => {
     try {
         const [apps] = await db.query(`
-            SELECT a.*, t.title, t.description, t.reward_points, t.deadline, t.reward_url 
+            SELECT 
+                a.id, a.task_id, a.status, a.created_at, a.proof_image, a.completed_at,
+                t.title, t.total_prize_pool, t.max_participants, t.reward_url, t.description
             FROM applications a
             JOIN tasks t ON a.task_id = t.id
             WHERE a.worker_id = ?
@@ -106,156 +134,87 @@ router.get('/my/applications', authMiddleware, async (req, res) => {
     }
 });
 
-// Apply for a task
-router.post('/:id/apply', authMiddleware, async (req, res) => {
-    try {
-        const taskId = req.params.id;
-        const workerId = req.user.id;
-        
-        const [tasks] = await db.query('SELECT creator_id FROM tasks WHERE id = ?', [taskId]);
-        if (tasks.length === 0) return res.status(404).json({ error: 'Task not found' });
-        if (tasks[0].creator_id === workerId) return res.status(400).json({ error: 'Cannot apply to own task' });
-
-        const [existing] = await db.query('SELECT id FROM applications WHERE task_id = ? AND worker_id = ?', [taskId, workerId]);
-        if (existing.length > 0) return res.status(400).json({ error: 'Already applied' });
-
-        await db.query('INSERT INTO applications (task_id, worker_id) VALUES (?, ?)', [taskId, workerId]);
-        res.json({ message: 'Applied successfully' });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// Submit a task for review
-router.post('/:id/submit', authMiddleware, upload.single('proof'), async (req, res) => {
-    try {
-        const taskId = req.params.id;
-        const workerId = req.user.id;
-        const proofImage = req.file ? `/uploads/${req.file.filename}` : null;
-
-        if (!proofImage) {
-            return res.status(400).json({ error: 'Proof image is required' });
-        }
-
-        const [result] = await db.query(
-            "UPDATE applications SET status = 'submitted', proof_image = ? WHERE task_id = ? AND worker_id = ? AND status IN ('pending', 'accepted')",
-            [proofImage, taskId, workerId]
-        );
-        
-        if (result.affectedRows === 0) return res.status(400).json({ error: 'Application not found or not in correct state' });
-
-        res.json({ message: 'Task submitted for review' });
-    } catch(err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// Get applications for a task (for creator)
+// Get applications for a task (Creator view)
 router.get('/:id/applications', authMiddleware, async (req, res) => {
     try {
-        const taskId = req.params.id;
-        const creatorId = req.user.id;
-
-        const [tasks] = await db.query('SELECT id FROM tasks WHERE id = ? AND creator_id = ?', [taskId, creatorId]);
-        if (tasks.length === 0) return res.status(403).json({ error: 'Not authorized or task not found' });
-
         const [apps] = await db.query(`
             SELECT a.*, u.username as worker_username 
             FROM applications a 
             JOIN users u ON a.worker_id = u.id 
             WHERE a.task_id = ?
-        `, [taskId]);
+        `, [req.params.id]);
         res.json(apps);
     } catch (err) {
-        console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-// Review a submission (approve/reject)
+// Review submission
 router.post('/review/:appId', authMiddleware, async (req, res) => {
-    const connection = await db.getConnection();
-    try {
-        await connection.beginTransaction();
-        const appId = req.params.appId;
-        const { action } = req.body; // 'approve' or 'reject'
-        const creatorId = req.user.id;
-
-        // Get application and task details
-        const [apps] = await connection.query(`
-            SELECT a.status as app_status, a.worker_id, t.creator_id, t.reward_points, t.id as task_id
-            FROM applications a
-            JOIN tasks t ON a.task_id = t.id
-            WHERE a.id = ? FOR UPDATE
-        `, [appId]);
-
-        if (apps.length === 0) {
-            await connection.rollback();
-            return res.status(404).json({ error: 'Application not found' });
-        }
-
-        const appDetails = apps[0];
-        if (appDetails.creator_id !== creatorId) {
-            await connection.rollback();
-            return res.status(403).json({ error: 'Not authorized' });
-        }
-        if (appDetails.app_status !== 'submitted') {
-            await connection.rollback();
-            return res.status(400).json({ error: 'Application is not in submitted state' });
-        }
-
-        if (action === 'approve') {
-            // Update application status and set completed_at timestamp
-            await connection.query("UPDATE applications SET status = 'approved', completed_at = CURRENT_TIMESTAMP WHERE id = ?", [appId]);
-            // Update task status
-            await connection.query("UPDATE tasks SET status = 'completed' WHERE id = ?", [appDetails.task_id]);
-            // Transfer points to worker
-            await connection.query("UPDATE users SET points = points + ? WHERE id = ?", [appDetails.reward_points, appDetails.worker_id]);
-            await connection.commit();
-            res.json({ message: 'Submission approved, points transferred' });
-        } else if (action === 'reject') {
-            // Revert application status
-            await connection.query("UPDATE applications SET status = 'rejected' WHERE id = ?", [appId]);
-            // Do not refund points here for simplicity, or we could refund.
-            await connection.commit();
-            res.json({ message: 'Submission rejected' });
-        } else {
-            await connection.rollback();
-            res.status(400).json({ error: 'Invalid action' });
-        }
-    } catch(err) {
-        await connection.rollback();
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-    } finally {
-        connection.release();
-    }
-});
-
-// Update an application status (creator can 'accept' applications)
-router.post('/application/:appId/accept', authMiddleware, async (req, res) => {
     try {
         const appId = req.params.appId;
+        const { action } = req.body;
         const creatorId = req.user.id;
 
         const [apps] = await db.query(`
-            SELECT a.status as app_status, a.worker_id, t.creator_id, t.id as task_id
+            SELECT a.*, t.creator_id, t.total_prize_pool, t.max_participants, t.id as task_id
             FROM applications a
             JOIN tasks t ON a.task_id = t.id
             WHERE a.id = ?
         `, [appId]);
 
-        if (apps.length === 0) return res.status(404).json({ error: 'Application not found' });
-        const appDetails = apps[0];
-        
-        if (appDetails.creator_id !== creatorId) return res.status(403).json({ error: 'Not authorized' });
+        if (apps.length === 0 || apps[0].creator_id !== creatorId) return res.status(403).json({ error: 'Unauthorized' });
 
-        await db.query("UPDATE applications SET status = 'accepted' WHERE id = ?", [appId]);
-        res.json({ message: 'Application accepted' });
+        if (action === 'approve') {
+            await db.query("UPDATE applications SET status = 'approved', completed_at = CURRENT_TIMESTAMP WHERE id = ?", [appId]);
+            const [approved] = await db.query('SELECT COUNT(*) as count FROM applications WHERE task_id = ? AND status = "approved"', [apps[0].task_id]);
+            if (approved[0].count >= apps[0].max_participants) {
+                await db.query('UPDATE tasks SET status = "completed" WHERE id = ?', [apps[0].task_id]);
+            }
+            res.json({ message: 'Approved' });
+        } else {
+            await db.query("UPDATE applications SET status = 'rejected' WHERE id = ?", [appId]);
+            res.json({ message: 'Rejected' });
+        }
     } catch(err) {
-        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Delete task
+router.delete('/:id', authMiddleware, async (req, res) => {
+    try {
+        const [tasks] = await db.query('SELECT creator_id FROM tasks WHERE id = ?', [req.params.id]);
+        if (tasks.length === 0) return res.status(404).json({ error: 'Not found' });
+        if (tasks[0].creator_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+        await db.query('DELETE FROM tasks WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Deleted' });
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get my created tasks
+router.get('/my/created', authMiddleware, async (req, res) => {
+    try {
+        const [tasks] = await db.query('SELECT * FROM tasks WHERE creator_id = ? ORDER BY created_at DESC', [req.user.id]);
+        res.json(tasks);
+    } catch(err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Submit work proof
+router.post('/:id/submit', authMiddleware, upload.single('proof'), async (req, res) => {
+    try {
+        const proofImage = req.file ? `/uploads/${req.file.filename}` : null;
+        if (!proofImage) return res.status(400).json({ error: 'Proof image required' });
+        await db.query(
+            "UPDATE applications SET status = 'submitted', proof_image = ? WHERE task_id = ? AND worker_id = ? AND status = 'pending'",
+            [proofImage, req.params.id, req.user.id]
+        );
+        res.json({ message: 'Submitted' });
+    } catch(err) {
         res.status(500).json({ error: 'Server error' });
     }
 });

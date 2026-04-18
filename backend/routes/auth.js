@@ -2,6 +2,8 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const router = express.Router();
 
@@ -54,9 +56,9 @@ router.post('/login', async (req, res) => {
             { expiresIn: '1d' }
         );
 
-        res.json({ token, user: { id: user.id, username: user.username, points: user.points, role: user.role } });
+        res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
     } catch (err) {
-        console.error(err);
+        console.error('Login Error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -68,7 +70,7 @@ router.get('/me', async (req, res) => {
     const token = authHeader.split(' ')[1];
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const [users] = await db.query('SELECT id, username, points, role FROM users WHERE id = ?', [decoded.id]);
+        const [users] = await db.query('SELECT id, username, role FROM users WHERE id = ?', [decoded.id]);
         if (users.length === 0) return res.status(404).json({ error: 'User not found' });
         
         res.json(users[0]);
