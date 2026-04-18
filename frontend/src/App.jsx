@@ -27,6 +27,7 @@ function App() {
         .catch(() => {
           localStorage.removeItem('token');
           delete axios.defaults.headers.common['Authorization'];
+          setUser(null);
         })
         .finally(() => setLoading(false));
     } else {
@@ -48,35 +49,31 @@ function App() {
 
   if (loading) return <div className="container" style={{ textAlign: "center", marginTop: "100px" }}>Loading...</div>;
 
-  if (!user) {
-    return (
-      <Router>
+  return (
+    <Router>
+      {!user ? (
         <Routes>
           <Route path="/login" element={<Login login={login} />} />
           <Route path="/register" element={<Register />} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
-      </Router>
-    );
-  }
-
-  return (
-    <Router>
-      <div className="app-layout">
-        <Sidebar user={user} logout={logout} />
-        <div className="main-content">
-          <Topbar user={user} />
-          <div className="page-container">
-            <Routes>
-              <Route path="/" element={<Home user={user} />} />
-              <Route path="/create" element={<CreateTask user={user} setCurrentUser={setUser} />} />
-              <Route path="/dashboard" element={<Dashboard user={user} />} />
-              <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} />
-              <Route path="*" element={<Navigate to="/" />} />
-            </Routes>
+      ) : (
+        <div className="app-layout">
+          <Sidebar user={user} logout={logout} />
+          <div className="main-content">
+            <Topbar user={user} />
+            <div className="page-container">
+              <Routes>
+                <Route path="/" element={<Home user={user} />} />
+                <Route path="/create" element={<CreateTask user={user} setCurrentUser={setUser} />} />
+                <Route path="/dashboard" element={<Dashboard user={user} />} />
+                <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} />
+                <Route path="*" element={<Navigate to="/" />} />
+              </Routes>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </Router>
   );
 }
