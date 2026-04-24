@@ -42,8 +42,36 @@ router.get('/tasks', adminMiddleware, async (req, res) => {
 router.put('/tasks/:id/approve', adminMiddleware, async (req, res) => {
     try {
         await db.query("UPDATE tasks SET status = 'open' WHERE id = ?", [req.params.id]);
+        
+        const [task] = await db.query('SELECT creator_id, title FROM tasks WHERE id = ?', [req.params.id]);
+        const io = req.app.get('socketio');
+        
+        if (task.length > 0) {
+            const taskTitle = task[0].title;
+            const creatorId = task[0].creator_id;
+
+            // 1. Notify the creator
+            io.to(`user_${creatorId}`).emit('notification', { message: `Your task "${taskTitle}" has been approved!` });
+            
+            // 2. Notify ALL users about the new task
+            const [users] = await db.query('SELECT id FROM users WHERE id != ?', [creatorId]);
+            const notificationMessage = `New task available: "${taskTitle}"`;
+            
+            if (users.length > 0) {
+                // Batch insert notifications for all other users
+                const notificationValues = users.map(u => [u.id, notificationMessage]);
+                await db.query('INSERT INTO notifications (user_id, message) VALUES ?', [notificationValues]);
+                
+                // Emit global notification for real-time update
+                io.emit('notification', { message: notificationMessage, type: 'new_task' });
+            }
+        }
+        
+        io.emit('task_open'); // Refresh task list for everyone
+
         res.json({ message: 'Task approved and published' });
     } catch (err) {
+        console.error('Task Approval Error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -52,6 +80,13 @@ router.put('/tasks/:id/approve', adminMiddleware, async (req, res) => {
 router.put('/tasks/:id/reject', adminMiddleware, async (req, res) => {
     try {
         await db.query("UPDATE tasks SET status = 'rejected' WHERE id = ?", [req.params.id]);
+        
+        const [task] = await db.query('SELECT creator_id, title FROM tasks WHERE id = ?', [req.params.id]);
+        const io = req.app.get('socketio');
+        if (task.length > 0) {
+            io.to(`user_${task[0].creator_id}`).emit('notification', { message: `Your task "${task[0].title}" was rejected.` });
+        }
+
         res.json({ message: 'Task rejected' });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -91,6 +126,10 @@ router.post('/withdrawals/:id/approve', adminMiddleware, upload.single('proof'),
                 'INSERT INTO notifications (user_id, message) VALUES (?, ?)',
                 [withdrawalInfo[0].user_id, `Your withdrawal request of $${withdrawalInfo[0].amount} has been approved.`]
             );
+            
+            const io = req.app.get('socketio');
+            io.to(`user_${withdrawalInfo[0].user_id}`).emit('notification', { message: `Your withdrawal request of $${withdrawalInfo[0].amount} has been approved.` });
+            io.to(`user_${withdrawalInfo[0].user_id}`).emit('balance_update');
         }
 
         res.json({ message: 'Withdrawal approved' });
@@ -119,6 +158,10 @@ router.post('/withdrawals/:id/reject', adminMiddleware, async (req, res) => {
             'INSERT INTO notifications (user_id, message) VALUES (?, ?)',
             [withdrawal[0].user_id, `Your withdrawal request of $${withdrawal[0].amount} has been rejected and refunded.`]
         );
+
+        const io = req.app.get('socketio');
+        io.to(`user_${withdrawal[0].user_id}`).emit('notification', { message: `Your withdrawal request of $${withdrawal[0].amount} has been rejected and refunded.` });
+        io.to(`user_${withdrawal[0].user_id}`).emit('balance_update');
 
         res.json({ message: 'Withdrawal rejected and balance refunded' });
     } catch (err) {

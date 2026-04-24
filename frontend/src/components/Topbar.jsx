@@ -2,28 +2,40 @@ import { Search, Bell, Mail, Check } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { useSocket } from '../context/SocketContext';
 
 export default function Topbar({ user }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const socket = useSocket();
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const dropdownRef = useRef(null);
 
+  const fetchNotifications = async () => {
+    try {
+      const res = await axios.get('/auth/notifications');
+      setNotifications(res.data);
+    } catch (err) {
+      console.error('Failed to fetch notifications');
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
-    const fetchNotifications = async () => {
-      try {
-        const res = await axios.get('/auth/notifications');
-        setNotifications(res.data);
-      } catch (err) {
-        console.error('Failed to fetch notifications');
-      }
-    };
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // Poll every 30s
-    return () => clearInterval(interval);
   }, [user]);
+
+  useEffect(() => {
+    if (socket) {
+      socket.on('notification', (data) => {
+        // Refresh notifications when a new one arrives
+        fetchNotifications();
+        // Optional: show a toast or alert
+      });
+      return () => socket.off('notification');
+    }
+  }, [socket]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Check, X, Users, DollarSign, Landmark, Image as ImageIcon, ExternalLink, Calendar, Wallet } from 'lucide-react';
+import { useSocket } from '../context/SocketContext';
 
 export default function AdminDashboard() {
   const [tasks, setTasks] = useState([]);
@@ -11,10 +12,11 @@ export default function AdminDashboard() {
   const [proofFile, setProofFile] = useState(null);
   const [isApproving, setIsApproving] = useState(false);
   const fileInputRef = useRef(null);
+  const socket = useSocket();
 
   const fetchAdminData = async () => {
     try {
-      setLoading(true);
+      // Don't set loading to true for socket refreshes to avoid flicker
       const [tasksRes, withdrawalsRes] = await Promise.all([
         axios.get('/admin/tasks'),
         axios.get('/admin/withdrawals')
@@ -32,6 +34,20 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchAdminData();
   }, []);
+
+  useEffect(() => {
+    if (socket) {
+      socket.on('admin_task_update', fetchAdminData);
+      socket.on('admin_withdrawal_update', fetchAdminData);
+      socket.on('task_created', fetchAdminData);
+      
+      return () => {
+        socket.off('admin_task_update');
+        socket.off('admin_withdrawal_update');
+        socket.off('task_created');
+      };
+    }
+  }, [socket]);
 
   const handleTaskAction = async (taskId, action) => {
     try {

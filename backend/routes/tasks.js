@@ -62,6 +62,9 @@ router.post('/', authMiddleware, async (req, res) => {
             [title, description, pool, participants, creatorId, deadline || null, reward_url || null]
         );
 
+        const io = req.app.get('socketio');
+        io.emit('task_created', { id: result.insertId, title });
+
         res.status(201).json({ id: result.insertId, message: 'Task created' });
     } catch (err) {
         console.error(err);
@@ -82,6 +85,10 @@ router.post('/:id/payment', authMiddleware, upload.single('deposit_proof'), asyn
             [depositProof, taskId, creatorId]
         );
         if (result.affectedRows === 0) return res.status(400).json({ error: 'Task not found or already paid' });
+        
+        const io = req.app.get('socketio');
+        io.emit('admin_task_update');
+
         res.json({ message: 'Payment proof submitted' });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -176,9 +183,17 @@ router.post('/review/:appId', authMiddleware, async (req, res) => {
             if (approved[0].count >= apps[0].max_participants) {
                 await db.query('UPDATE tasks SET status = "completed" WHERE id = ?', [apps[0].task_id]);
             }
+
+            const io = req.app.get('socketio');
+            io.to(`user_${apps[0].worker_id}`).emit('notification', { message: `Your application for "${apps[0].title}" was approved!` });
+
             res.json({ message: 'Approved' });
         } else {
             await db.query("UPDATE applications SET status = 'rejected' WHERE id = ?", [appId]);
+            
+            const io = req.app.get('socketio');
+            io.to(`user_${apps[0].worker_id}`).emit('notification', { message: `Your application for "${apps[0].title}" was rejected.` });
+
             res.json({ message: 'Rejected' });
         }
     } catch(err) {

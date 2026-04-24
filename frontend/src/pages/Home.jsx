@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { DollarSign, Users, Calendar } from "lucide-react";
+import { useSocket } from "../context/SocketContext";
 
 export default function Home({ user }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const socket = useSocket();
 
   const fetchTasks = async () => {
     try {
@@ -20,6 +22,17 @@ export default function Home({ user }) {
   useEffect(() => {
     fetchTasks();
   }, []);
+
+  useEffect(() => {
+    if (socket) {
+      socket.on('task_open', fetchTasks);
+      socket.on('task_created', fetchTasks);
+      return () => {
+        socket.off('task_open');
+        socket.off('task_created');
+      };
+    }
+  }, [socket]);
 
   const handleApply = async (taskId) => {
     if (!user) {

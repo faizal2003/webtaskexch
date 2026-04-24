@@ -183,6 +183,9 @@ router.post('/withdraw', authMiddleware, async (req, res) => {
         await db.query('UPDATE users SET balance = balance - ? WHERE id = ?', [amount, userId]);
         await db.query('INSERT INTO withdrawals (user_id, amount, bank_account, status) VALUES (?, ?, ?, "pending")', [userId, amount, bank_account]);
         
+        const io = req.app.get('socketio');
+        io.emit('admin_withdrawal_update');
+
         const [updatedUser] = await db.query('SELECT id, username, role, profile_picture, balance FROM users WHERE id = ?', [userId]);
         res.json({ message: 'Withdrawal request submitted successfully and is pending admin approval', user: updatedUser[0] });
     } catch (err) {

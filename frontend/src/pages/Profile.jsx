@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { User, Lock, Save, AlertCircle, Camera, Wallet, TrendingUp, ArrowUpRight, Landmark, RefreshCw, Clock, CheckCircle, XCircle, FileText } from 'lucide-react';
+import { useSocket } from '../context/SocketContext';
 
 export default function Profile({ user, setUser }) {
   const [username, setUsername] = useState(user.username);
@@ -15,6 +16,7 @@ export default function Profile({ user, setUser }) {
   const [withdrawalHistory, setWithdrawalHistory] = useState([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const fileInputRef = useRef(null);
+  const socket = useSocket();
 
   const fetchData = useCallback(async (showLoading = false) => {
     if (showLoading) setIsSyncing(true);
@@ -37,6 +39,17 @@ export default function Profile({ user, setUser }) {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (socket) {
+      socket.on('balance_update', () => fetchData(false));
+      socket.on('notification', () => fetchData(false));
+      return () => {
+        socket.off('balance_update');
+        socket.off('notification');
+      };
+    }
+  }, [socket, fetchData]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];

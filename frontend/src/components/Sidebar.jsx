@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Users, CheckSquare, Gift, ShieldAlert, User, HelpCircle, LogOut } from 'lucide-react';
+import { Home, CheckSquare, ShieldAlert, User, HelpCircle, LogOut } from 'lucide-react';
 
 export default function Sidebar({ user, logout }) {
   const location = useLocation();
@@ -18,16 +18,8 @@ export default function Sidebar({ user, logout }) {
         <Home size={18} /> Overview
       </Link>
       
-      <Link to="/#disabled" className="menu-link" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-        <Users size={18} /> My People
-      </Link>
-      
       <Link to="/dashboard" className={`menu-link ${location.pathname.startsWith('/dashboard') || location.pathname === '/create' ? 'active' : ''}`}>
         <CheckSquare size={18} /> Manage Task
-      </Link>
-
-      <Link to="/#disabled" className="menu-link" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-        <Gift size={18} /> Rewards
       </Link>
 
       {user.role === 'admin' && (

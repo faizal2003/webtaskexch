@@ -12,6 +12,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import PaymentPage from './pages/PaymentPage';
 import TermsAndConditions from './pages/TermsAndConditions';
 import Profile from './pages/Profile';
+import { SocketProvider } from './context/SocketContext';
 
 axios.defaults.baseURL = 'http://localhost:5000/api';
 
@@ -62,24 +63,26 @@ function App() {
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
       ) : (
-        <div className="app-layout">
-          <Sidebar user={user} logout={logout} />
-          <div className="main-content">
-            <Topbar user={user} />
-            <div className="page-container">
-              <Routes>
-                <Route path="/" element={<Home user={user} />} />
-                <Route path="/create" element={<CreateTask user={user} />} />
-                <Route path="/payment/:taskId" element={<PaymentPage />} />
-                <Route path="/dashboard" element={<Dashboard user={user} />} />
-                <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} />
-                <Route path="/profile" element={<Profile user={user} setUser={setUser} />} />
-                <Route path="/terms" element={<TermsAndConditions />} />
-                <Route path="*" element={<Navigate to="/" />} />
-              </Routes>
+        <SocketProvider user={user}>
+          <div className="app-layout">
+            <Sidebar user={user} logout={logout} />
+            <div className="main-content">
+              <Topbar user={user} />
+              <div className="page-container">
+                <Routes>
+                  <Route path="/" element={<Home user={user} />} />
+                  <Route path="/create" element={<CreateTask user={user} />} />
+                  <Route path="/payment/:taskId" element={<PaymentPage />} />
+                  <Route path="/dashboard" element={<Dashboard user={user} />} />
+                  <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} />
+                  <Route path="/profile" element={<Profile user={user} setUser={setUser} />} />
+                  <Route path="/terms" element={<TermsAndConditions />} />
+                  <Route path="*" element={<Navigate to="/" />} />
+                </Routes>
+              </div>
             </div>
           </div>
-        </div>
+        </SocketProvider>
       )}
     </Router>
   );
