@@ -53,6 +53,9 @@ export default function Register() {
         
         <div className="footer-text">
           Already have an account? <Link to="/login">Sign in</Link>
+          <div style={{ marginTop: '10px', fontSize: '0.85rem' }}>
+            By registering, you agree to our <Link to="/terms">Terms and Conditions</Link>
+          </div>
         </div>
       </div>
     </div>

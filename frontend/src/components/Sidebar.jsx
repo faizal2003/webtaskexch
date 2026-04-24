@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Users, CheckSquare, Gift, ShieldAlert, Settings, HelpCircle, LogOut } from 'lucide-react';
+import { Home, Users, CheckSquare, Gift, ShieldAlert, User, HelpCircle, LogOut } from 'lucide-react';
 
 export default function Sidebar({ user, logout }) {
   const location = useLocation();
@@ -37,13 +37,40 @@ export default function Sidebar({ user, logout }) {
       )}
 
       <div className="menu-section">OTHERS</div>
-      <Link to="/#disabled" className="menu-link" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-        <Settings size={18} /> Settings
+      <Link to="/profile" className={`menu-link ${location.pathname === '/profile' ? 'active' : ''}`}>
+        <User size={18} /> Profile
       </Link>
       
-      <Link to="/#disabled" className="menu-link" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-        <HelpCircle size={18} /> Help Center
+      <Link to="/terms" className={`menu-link ${location.pathname === '/terms' ? 'active' : ''}`}>
+        <HelpCircle size={18} /> Terms & Conditions
       </Link>
+
+      <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid var(--border-color)', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px' }}>
+          <div style={{ 
+            width: '36px', 
+            height: '36px', 
+            borderRadius: '50%', 
+            background: 'var(--primary)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            fontSize: '0.8rem',
+            fontWeight: 'bold',
+            overflow: 'hidden'
+          }}>
+            {user.profile_picture ? (
+              <img src={`http://localhost:5000${user.profile_picture}`} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              user.username.charAt(0).toUpperCase()
+            )}
+          </div>
+          <div style={{ overflow: 'hidden' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.username}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{user.role}</div>
+          </div>
+        </div>
+      </div>
 
       <a href="#" onClick={(e) => { e.preventDefault(); logout(); }} className="menu-link">
         <LogOut size={18} /> Logout

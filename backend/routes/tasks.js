@@ -167,6 +167,11 @@ router.post('/review/:appId', authMiddleware, async (req, res) => {
 
         if (action === 'approve') {
             await db.query("UPDATE applications SET status = 'approved', completed_at = CURRENT_TIMESTAMP WHERE id = ?", [appId]);
+            
+            // Calculate reward and credit user balance
+            const reward = Math.floor(apps[0].total_prize_pool / apps[0].max_participants);
+            await db.query("UPDATE users SET balance = balance + ? WHERE id = ?", [reward, apps[0].worker_id]);
+
             const [approved] = await db.query('SELECT COUNT(*) as count FROM applications WHERE task_id = ? AND status = "approved"', [apps[0].task_id]);
             if (approved[0].count >= apps[0].max_participants) {
                 await db.query('UPDATE tasks SET status = "completed" WHERE id = ?', [apps[0].task_id]);

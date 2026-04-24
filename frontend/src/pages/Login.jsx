@@ -51,6 +51,9 @@ export default function Login({ login }) {
         
         <div className="footer-text">
           Don't have an account? <Link to="/register">Create one</Link>
+          <div style={{ marginTop: '10px', fontSize: '0.85rem' }}>
+            By logging in, you agree to our <Link to="/terms">Terms and Conditions</Link>
+          </div>
         </div>
       </div>
     </div>

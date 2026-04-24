@@ -10,6 +10,8 @@ import CreateTask from './pages/CreateTask';
 import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import PaymentPage from './pages/PaymentPage';
+import TermsAndConditions from './pages/TermsAndConditions';
+import Profile from './pages/Profile';
 
 axios.defaults.baseURL = 'http://localhost:5000/api';
 
@@ -56,6 +58,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login login={login} />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/terms" element={<TermsAndConditions />} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
       ) : (
@@ -70,6 +73,8 @@ function App() {
                 <Route path="/payment/:taskId" element={<PaymentPage />} />
                 <Route path="/dashboard" element={<Dashboard user={user} />} />
                 <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} />
+                <Route path="/profile" element={<Profile user={user} setUser={setUser} />} />
+                <Route path="/terms" element={<TermsAndConditions />} />
                 <Route path="*" element={<Navigate to="/" />} />
               </Routes>
             </div>
