@@ -9,6 +9,29 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const multer = require('multer');
 const fs = require('fs');
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
+
+function generateOTP() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+async function sendOTPEmail(email, otp) {
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'Email Verification OTP',
+        text: `Your OTP for verification is: ${otp}. It will expire in 10 minutes.`
+    };
+    await transporter.sendMail(mailOptions);
+}
 
 if (!fs.existsSync('uploads/profiles')) {
     if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
@@ -28,25 +51,100 @@ const upload = multer({ storage: storage });
 
 router.post('/register', async (req, res) => {
     try {
-        const { username, password } = req.body;
-        if (!username || !password) {
-            return res.status(400).json({ error: 'Username and password required' });
+        const { username, email, password } = req.body;
+        if (!username || !email || !password) {
+            return res.status(400).json({ error: 'Username, email and password required' });
         }
 
-        const [existing] = await db.query('SELECT id FROM users WHERE username = ?', [username]);
+        const [existing] = await db.query('SELECT id FROM users WHERE username = ? OR email = ?', [username, email]);
         if (existing.length > 0) {
-            return res.status(400).json({ error: 'Username already taken' });
+            return res.status(400).json({ error: 'Username or email already taken' });
         }
 
         const salt = await bcrypt.genSalt(10);
         const hash = await bcrypt.hash(password, salt);
+        const otp = generateOTP();
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
         const [result] = await db.query(
-            'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-            [username, hash]
+            'INSERT INTO users (username, email, password_hash, otp, otp_expires_at, is_verified) VALUES (?, ?, ?, ?, ?, ?)',
+            [username, email, hash, otp, otpExpiresAt, false]
         );
 
-        res.status(201).json({ id: result.insertId, username, message: 'User registered successfully' });
+        try {
+            await sendOTPEmail(email, otp);
+        } catch (mailErr) {
+            console.error('Error sending email:', mailErr);
+            // We still registered the user, but couldn't send the email. 
+            // In a real app, you might want to handle this differently.
+        }
+
+        res.status(201).json({ id: result.insertId, username, message: 'User registered. Please verify your email with the OTP sent.' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/verify-otp', async (req, res) => {
+    try {
+        const { username, otp } = req.body;
+        if (!username || !otp) {
+            return res.status(400).json({ error: 'Username and OTP required' });
+        }
+
+        const [users] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        if (users.length === 0) {
+            return res.status(400).json({ error: 'User not found' });
+        }
+
+        const user = users[0];
+        if (user.is_verified) {
+            return res.status(400).json({ error: 'User already verified' });
+        }
+
+        if (user.otp !== otp) {
+            return res.status(400).json({ error: 'Invalid OTP' });
+        }
+
+        if (new Date() > new Date(user.otp_expires_at)) {
+            return res.status(400).json({ error: 'OTP expired' });
+        }
+
+        await db.query('UPDATE users SET is_verified = TRUE, otp = NULL, otp_expires_at = NULL WHERE id = ?', [user.id]);
+
+        res.json({ message: 'Email verified successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/resend-otp', async (req, res) => {
+    try {
+        const { username } = req.body;
+        if (!username) {
+            return res.status(400).json({ error: 'Username required' });
+        }
+
+        const [users] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        if (users.length === 0) {
+            return res.status(400).json({ error: 'User not found' });
+        }
+
+        const user = users[0];
+        if (user.is_verified) {
+            return res.status(400).json({ error: 'User already verified' });
+        }
+
+        const otp = generateOTP();
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+        await db.query('UPDATE users SET otp = ?, otp_expires_at = ? WHERE id = ?', [otp, otpExpiresAt, user.id]);
+
+        await sendOTPEmail(user.email, otp);
+
+        res.json({ message: 'OTP resent successfully' });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
@@ -63,6 +161,11 @@ router.post('/login', async (req, res) => {
         }
 
         const user = users[0];
+
+        if (!user.is_verified) {
+            return res.status(401).json({ error: 'Please verify your email first', unverified: true });
+        }
+
         const validPassword = await bcrypt.compare(password, user.password_hash);
 
         if (!validPassword) {
@@ -75,7 +178,7 @@ router.post('/login', async (req, res) => {
             { expiresIn: '1d' }
         );
 
-        res.json({ token, user: { id: user.id, username: user.username, role: user.role, profile_picture: user.profile_picture, balance: user.balance } });
+        res.json({ token, user: { id: user.id, username: user.username, role: user.role, profile_picture: user.profile_picture, balance: user.balance, phone: user.phone } });
     } catch (err) {
         console.error('Login Error:', err);
         res.status(500).json({ error: 'Server error' });
@@ -89,7 +192,7 @@ router.get('/me', async (req, res) => {
     const token = authHeader.split(' ')[1];
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const [users] = await db.query('SELECT id, username, role, profile_picture, balance FROM users WHERE id = ?', [decoded.id]);
+        const [users] = await db.query('SELECT id, username, role, profile_picture, balance, phone FROM users WHERE id = ?', [decoded.id]);
         if (users.length === 0) return res.status(404).json({ error: 'User not found' });
         
         res.json(users[0]);
@@ -100,7 +203,7 @@ router.get('/me', async (req, res) => {
 
 router.put('/profile', authMiddleware, upload.single('profile_picture'), async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password, phone } = req.body;
         const userId = req.user.id;
 
         const updates = [];
@@ -123,6 +226,11 @@ router.put('/profile', authMiddleware, upload.single('profile_picture'), async (
             params.push(hash);
         }
 
+        if (phone !== undefined) {
+            updates.push('phone = ?');
+            params.push(phone);
+        }
+
         if (req.file) {
             const profilePicPath = `/uploads/profiles/${req.file.filename}`;
             updates.push('profile_picture = ?');
@@ -136,7 +244,7 @@ router.put('/profile', authMiddleware, upload.single('profile_picture'), async (
         params.push(userId);
         await db.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
-        const [updatedUser] = await db.query('SELECT id, username, role, profile_picture, balance FROM users WHERE id = ?', [userId]);
+        const [updatedUser] = await db.query('SELECT id, username, role, profile_picture, balance, phone FROM users WHERE id = ?', [userId]);
         res.json({ message: 'Profile updated successfully', user: updatedUser[0] });
     } catch (err) {
         console.error('Update Profile Error:', err);
@@ -174,7 +282,12 @@ router.post('/withdraw', authMiddleware, async (req, res) => {
             return res.status(400).json({ error: 'Invalid amount or bank account' });
         }
 
-        const [users] = await db.query('SELECT balance FROM users WHERE id = ?', [userId]);
+        const [users] = await db.query('SELECT balance, phone FROM users WHERE id = ?', [userId]);
+        
+        if (!users[0].phone) {
+            return res.status(400).json({ error: 'Please add a phone number to your profile before withdrawing' });
+        }
+
         if (users[0].balance < amount) {
             return res.status(400).json({ error: 'Insufficient balance' });
         }

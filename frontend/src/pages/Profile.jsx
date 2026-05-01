@@ -1,20 +1,24 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { User, Lock, Save, AlertCircle, Camera, Wallet, TrendingUp, ArrowUpRight, Landmark, RefreshCw, Clock, CheckCircle, XCircle, FileText } from 'lucide-react';
+import { User, Lock, Save, AlertCircle, Camera, Wallet, TrendingUp, ArrowUpRight, Landmark, RefreshCw, Clock, CheckCircle, XCircle, FileText, Phone, ShieldCheck } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 
 export default function Profile({ user, setUser }) {
   const [username, setUsername] = useState(user.username);
+  const [phone, setPhone] = useState(user.phone || '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
   const [loading, setLoading] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
   const [preview, setPreview] = useState(user.profile_picture ? `http://localhost:5000${user.profile_picture}` : null);
   const [stats, setStats] = useState({ total_accumulation: 0 });
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [bankAccount, setBankAccount] = useState('');
   const [withdrawalHistory, setWithdrawalHistory] = useState([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  
   const fileInputRef = useRef(null);
   const socket = useSocket();
 
@@ -29,6 +33,8 @@ export default function Profile({ user, setUser }) {
       setStats(statsRes.data);
       setUser(userRes.data);
       setWithdrawalHistory(historyRes.data);
+      setPhone(userRes.data.phone || '');
+      setUsername(userRes.data.username);
     } catch (err) {
       console.error('Failed to sync data');
     } finally {
@@ -62,18 +68,14 @@ export default function Profile({ user, setUser }) {
     }
   };
 
-  const handleUpdate = async (e) => {
+  const handleUpdateProfile = async (e) => {
     e.preventDefault();
     setMessage({ type: '', text: '' });
-
-    if (password && password !== confirmPassword) {
-      return setMessage({ type: 'error', text: 'Passwords do not match' });
-    }
 
     setLoading(true);
     const formData = new FormData();
     if (username !== user.username) formData.append('username', username);
-    if (password) formData.append('password', password);
+    if (phone !== user.phone) formData.append('phone', phone);
     if (fileInputRef.current.files[0]) {
       formData.append('profile_picture', fileInputRef.current.files[0]);
     }
@@ -89,8 +91,6 @@ export default function Profile({ user, setUser }) {
       if (res.data.user) {
         setUser(res.data.user);
       }
-      setPassword('');
-      setConfirmPassword('');
     } catch (err) {
       setMessage({ 
         type: 'error', 
@@ -101,10 +101,44 @@ export default function Profile({ user, setUser }) {
     }
   };
 
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setMessage({ type: '', text: '' });
+
+    if (!password) {
+      return setMessage({ type: 'error', text: 'Please enter a new password' });
+    }
+
+    if (password !== confirmPassword) {
+      return setMessage({ type: 'error', text: 'Passwords do not match' });
+    }
+
+    setPasswordLoading(true);
+    try {
+      const res = await axios.put('/auth/profile', { password });
+      setMessage({ type: 'success', text: 'Password updated successfully' });
+      setPassword('');
+      setConfirmPassword('');
+      setShowPasswordForm(false);
+    } catch (err) {
+      setMessage({ 
+        type: 'error', 
+        text: err.response?.data?.error || 'Failed to update password' 
+      });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   const handleWithdraw = async (e) => {
     e.preventDefault();
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0 || !bankAccount) return;
     
+    if (!user.phone) {
+      setMessage({ type: 'error', text: 'Please add a phone number to your profile before withdrawing' });
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await axios.post('/auth/withdraw', { 
@@ -186,6 +220,21 @@ export default function Profile({ user, setUser }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
           <div className="card" style={{ padding: '32px' }}>
             <h3 style={{ marginBottom: '24px', fontSize: '1.1rem' }}>Withdraw Credits</h3>
+            {!user.phone && (
+              <div style={{ 
+                padding: '12px', 
+                borderRadius: '8px', 
+                background: 'rgba(239, 68, 68, 0.05)', 
+                color: 'var(--danger-text)',
+                fontSize: '0.85rem',
+                marginBottom: '16px',
+                display: 'flex',
+                gap: '8px'
+              }}>
+                <AlertCircle size={16} />
+                Please add a phone number in settings to enable withdrawals.
+              </div>
+            )}
             <form onSubmit={handleWithdraw}>
               <div className="form-group">
                 <label>Amount to Withdraw ($)</label>
@@ -213,7 +262,7 @@ export default function Profile({ user, setUser }) {
                 type="submit" 
                 className="btn-primary" 
                 style={{ width: '100%', justifyContent: 'center' }}
-                disabled={loading || !withdrawAmount || parseFloat(withdrawAmount) > user.balance || !bankAccount}
+                disabled={loading || !withdrawAmount || parseFloat(withdrawAmount) > user.balance || !bankAccount || !user.phone}
               >
                 <ArrowUpRight size={18} /> Request Payout
               </button>
@@ -222,7 +271,7 @@ export default function Profile({ user, setUser }) {
 
           <div className="card" style={{ padding: '32px' }}>
             <h3 style={{ marginBottom: '24px', fontSize: '1.1rem' }}>Account Settings</h3>
-            <form onSubmit={handleUpdate}>
+            <form onSubmit={handleUpdateProfile}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '24px' }}>
                 <div 
                   style={{ 
@@ -273,8 +322,8 @@ export default function Profile({ user, setUser }) {
               </div>
 
               <div className="form-group">
-                <label><Lock size={14} /> New Password</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+                <label><Phone size={14} /> Phone Number</label>
+                <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. +1234567890" />
               </div>
 
               <button 
@@ -286,6 +335,53 @@ export default function Profile({ user, setUser }) {
                 {loading ? 'Updating...' : 'Update Settings'}
               </button>
             </form>
+
+            <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--border-color)' }}>
+              {!showPasswordForm ? (
+                <button 
+                  onClick={() => setShowPasswordForm(true)}
+                  className="btn-secondary"
+                  style={{ 
+                    width: '100%', 
+                    justifyContent: 'center', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '8px', 
+                    background: 'rgba(124, 58, 237, 0.1)', 
+                    border: '1px solid rgba(124, 58, 237, 0.3)',
+                    color: 'var(--primary)',
+                    fontWeight: '600'
+                  }}
+                >
+                  <Lock size={16} /> Change Password
+                </button>
+              ) : (
+                <form onSubmit={handleChangePassword} className="fade-in">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h4 style={{ fontSize: '0.9rem', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <ShieldCheck size={16} color="var(--primary)" /> Security Update
+                    </h4>
+                    <button type="button" onClick={() => setShowPasswordForm(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
+                  </div>
+                  <div className="form-group">
+                    <label>New Password</label>
+                    <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                  </div>
+                  <div className="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="••••••••" required />
+                  </div>
+                  <button 
+                    type="submit" 
+                    className="btn-primary" 
+                    style={{ width: '100%', justifyContent: 'center', background: 'var(--primary-dark)' }}
+                    disabled={passwordLoading}
+                  >
+                    {passwordLoading ? 'Updating...' : 'Save New Password'}
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         </div>
 
